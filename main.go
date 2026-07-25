@@ -27,7 +27,7 @@ type Server struct {
 }
 
 func main() {
-	cfgPath := flag.String("c", "config.yml", "path to server config yml")
+	cfgPath := flag.String("c", "config/config.yml", "path to server config yml")
 	flag.Parse()
 
 	cfg, err := LoadConfig(*cfgPath)

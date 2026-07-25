@@ -1,0 +1,13 @@
+host: 0.0.0.0
+port: 8080
+agent_count: 3          # この人数が接続したらゲーム開始
+
+# reveal_all   : 最後まで開示し、各エージェントの最速正解位置でスコア(1問1回・誤答ロックアウト)
+# first_answer : 誰かが正解したら終了(誤答はロックアウトして続行)。競技寄り
+# benchmark    : 誤答ロックアウト無し。毎トークン回答してよく、最速正解位置でスコア。
+#                pass を使わない「常時回答型」(hayabusa-chick そのまま)が乗る
+mode: reveal_all
+
+judge: normalized_match  # 解答の正規化文字列一致
+questions: data/questions.csv
+response_timeout_ms: 30000
