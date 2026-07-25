@@ -11,14 +11,14 @@ Go 1.22 以上。
 ```bash
 git clone git@github.com:HayabusaContest/hayabusa-quiz-server.git
 cd hayabusa-quiz-server
-go run . -c config.yml        # ws://localhost:8080/ws で待受
+go run . -c config/config.yml        # ws://localhost:8080/ws で待受
 ```
 
 単体バイナリにする場合:
 
 ```bash
 go build -o hayabusa-quiz-server .
-./hayabusa-quiz-server -c config.yml
+./hayabusa-quiz-server -c config/config.yml
 ```
 
 Docker:
@@ -28,7 +28,7 @@ docker build -t hayabusa-quiz-server .
 docker run -p 8080:8080 hayabusa-quiz-server
 ```
 
-## 設定(config.yml)
+## 設定(config/config.yml)
 
 ```yaml
 agent_count: 3           # この人数が接続したらゲーム開始
@@ -38,9 +38,10 @@ questions: data/questions.csv
 response_timeout_ms: 30000
 ```
 
-- **reveal_all** … 最後まで開示し、各エージェントの最速正解位置でスコア。
-- **first_answer** … 誰かが正解したら終了(誤答はロックアウトして続行)。
-- 1問1回(pass以外を返した時点で確定)。サーバは1ゲーム終了後も**常駐**し、次の接続を待ちます。
+- **reveal_all** … 最後まで開示し、各エージェントの最速正解位置でスコア(1問1回・誤答ロックアウト)。
+- **first_answer** … 誰かが正解したら終了(誤答はロックアウトして続行)。競技寄り。
+- **benchmark** … 誤答ロックアウト無し・毎トークン回答可。最速正解位置でスコア。pass を使わない**常時回答型(hayabusa-chick そのまま)**が乗る。
+- サーバは1ゲーム終了後も**常駐**し、次の接続を待ちます。
 
 ## エンドポイント
 

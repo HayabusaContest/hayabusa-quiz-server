@@ -27,6 +27,7 @@ const (
 	replyPass = "pass"
 
 	modeFirstAnswer = "first_answer"
+	modeBenchmark   = "benchmark"
 )
 
 type Game struct {
@@ -102,6 +103,7 @@ func (g *Game) playQuestion(qid int, q Question) {
 	g.view(ViewEvent{Type: "question_start", QuestionID: qid, Total: total})
 
 	firstAnswer := g.cfg.Mode == modeFirstAnswer
+	benchmark := g.cfg.Mode == modeBenchmark
 
 	for i := 1; i <= total; i++ {
 		var active []*Agent
@@ -146,13 +148,18 @@ func (g *Game) playQuestion(qid int, q Question) {
 			if reply == "" || strings.EqualFold(reply, replyPass) {
 				continue // still watching
 			}
-			a.Committed = true // one-shot: this is the agent's answer for the question
 			ok := judge(reply, q.Answer)
 			if ok {
+				a.Committed = true // 正解で確定(以後この問題は抜ける)
 				a.CorrectAt = i
 				correctNow = true
 				log.Printf("Q%d [%s] CORRECT at %d/%d: %q", qid, a.Name, i, total, reply)
+			} else if benchmark {
+				// benchmark: 誤答はロックアウトも確定もせず、次の文字でまた回答できる
+				// (毎トークン回答する常時回答型エージェントがそのまま乗る)
+				log.Printf("Q%d [%s] wrong at %d/%d: %q (benchmark: 続行)", qid, a.Name, i, total, reply)
 			} else {
+				a.Committed = true // 1問1回:誤答でロックアウト
 				a.LockedOut = true
 				log.Printf("Q%d [%s] WRONG at %d/%d: %q (locked out)", qid, a.Name, i, total, reply)
 			}

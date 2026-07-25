@@ -14,7 +14,7 @@ type Config struct {
 	Host              string `yaml:"host"`
 	Port              int    `yaml:"port"`
 	AgentCount        int    `yaml:"agent_count"`
-	Mode              string `yaml:"mode"`  // reveal_all | first_answer
+	Mode              string `yaml:"mode"`  // reveal_all | first_answer | benchmark
 	Judge             string `yaml:"judge"` // normalized_match
 	Questions         string `yaml:"questions"`
 	ResponseTimeoutMs int    `yaml:"response_timeout_ms"`
@@ -49,8 +49,8 @@ func LoadConfig(path string) (*Config, error) {
 	if c.AgentCount < 1 {
 		return nil, fmt.Errorf("config: agent_count must be >= 1")
 	}
-	if c.Mode != "reveal_all" && c.Mode != "first_answer" {
-		return nil, fmt.Errorf("config: mode must be 'reveal_all' or 'first_answer'")
+	if c.Mode != "reveal_all" && c.Mode != "first_answer" && c.Mode != "benchmark" {
+		return nil, fmt.Errorf("config: mode must be 'reveal_all', 'first_answer', or 'benchmark'")
 	}
 	return c, nil
 }
