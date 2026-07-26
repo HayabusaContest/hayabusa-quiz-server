@@ -9,9 +9,7 @@ import (
 	"time"
 )
 
-// EventSink は観戦イベント(ViewEvent)の出力先。ゲーム進行(logic)は「イベントを
-// 出す」だけで、整形・配信・保存は各 sink 側が担う(関心の分離)。sink を足せば
-// 出力先を増やせる(例: 観戦ハブ配信 / JSONL ログ / 将来の REST・実況 など)。
+// EventSink は観戦イベントの出力先。sink を足せば出力先(配信/ログ/…)を増やせる。
 type EventSink interface {
 	Emit(e ViewEvent)
 	Close()

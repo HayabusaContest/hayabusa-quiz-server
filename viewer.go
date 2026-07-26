@@ -24,10 +24,8 @@ type ViewEvent struct {
 	Agents     []string       `json:"agents,omitempty"`
 }
 
-// Hub fans out one game's spectator events to its viewers. Viewers are
-// write-only (they never affect the game) and never block it. The hub keeps
-// the event history so a viewer that connects mid-game is replayed the events
-// so far and immediately sees the current state.
+// Hub fans out one game's spectator events to its viewers (write-only). It keeps
+// the event history so a viewer connecting mid-game is replayed and catches up.
 type Hub struct {
 	mu      sync.Mutex
 	viewers map[*websocket.Conn]struct{}

@@ -126,13 +126,8 @@ func (g *Game) Run() {
 	log.Printf("[%s] === GAME FINISHED === %v", g.ID, final)
 }
 
-// playQuestion reveals the question one rune at a time in lockstep.
-// Each step all still-active agents must reply "pass" or an answer;
-// the first non-pass answer commits an agent for the whole question.
-//   - reveal_all:   reveal to the end; each agent scored by its earliest correct.
-//   - first_answer: a correct answer ends the question (wrong answers lock out
-//     that agent and revealing continues for the rest).
-//   - benchmark:    wrong answers neither commit nor lock out (always-answer agents).
+// playQuestion reveals the question one rune at a time in lockstep, scoring by
+// earliest correct. Modes: reveal_all / first_answer / benchmark (see config).
 func (g *Game) playQuestion(qid int, q Question) {
 	for _, a := range g.agents {
 		a.Committed = false
