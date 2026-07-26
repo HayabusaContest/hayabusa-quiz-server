@@ -18,6 +18,7 @@ type Config struct {
 	Judge             string `yaml:"judge"` // normalized_match
 	Questions         string `yaml:"questions"`
 	ResponseTimeoutMs int    `yaml:"response_timeout_ms"`
+	LogDir            string `yaml:"log_dir"` // ゲームログ(JSONL)の保存先。空なら保存しない
 }
 
 // Question is one quiz row (No, 問題文, 解答).
@@ -39,6 +40,7 @@ func LoadConfig(path string) (*Config, error) {
 		Mode:              "reveal_all",
 		Judge:             "normalized_match",
 		ResponseTimeoutMs: 30000,
+		LogDir:            "logs",
 	}
 	if err := yaml.Unmarshal(b, c); err != nil {
 		return nil, err

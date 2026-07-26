@@ -1,3 +1,6 @@
 # build 成果物(バイナリ名は go build 既定でディレクトリ名になる)
 /hayabusa-quiz-server
 *.exe
+
+# ゲームログ
+logs/

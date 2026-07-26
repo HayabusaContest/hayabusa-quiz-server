@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -35,7 +39,8 @@ type Game struct {
 	agents []*Agent
 	qs     []Question
 	rt     time.Duration
-	hub    *Hub // spectator feed (may be nil)
+	hub    *Hub     // spectator feed (may be nil)
+	logf   *os.File // game log (JSONL of view events); may be nil
 }
 
 func NewGame(cfg *Config, agents []*Agent, qs []Question, hub *Hub) *Game {
@@ -60,10 +65,43 @@ func (g *Game) view(e ViewEvent) {
 	if g.hub != nil {
 		g.hub.Broadcast(e)
 	}
+	if g.logf != nil {
+		if b, err := json.Marshal(e); err == nil {
+			_, _ = g.logf.Write(append(b, '\n'))
+		}
+	}
+}
+
+func (g *Game) openLog() {
+	if g.cfg.LogDir == "" {
+		return
+	}
+	if err := os.MkdirAll(g.cfg.LogDir, 0o755); err != nil {
+		log.Printf("log dir error: %v", err)
+		return
+	}
+	path := filepath.Join(g.cfg.LogDir, fmt.Sprintf("game_%s.jsonl", time.Now().Format("20060102-150405")))
+	f, err := os.Create(path)
+	if err != nil {
+		log.Printf("log file error: %v", err)
+		return
+	}
+	g.logf = f
+	log.Printf("logging game to %s", path)
+}
+
+func (g *Game) closeLog() {
+	if g.logf != nil {
+		_ = g.logf.Close()
+		g.logf = nil
+	}
 }
 
 // Run plays every question, then broadcasts the final scores.
 func (g *Game) Run() {
+	g.openLog()
+	defer g.closeLog()
+
 	names := make([]string, len(g.agents))
 	for i, a := range g.agents {
 		names[i] = a.Name

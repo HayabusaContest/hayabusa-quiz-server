@@ -36,7 +36,10 @@ mode: reveal_all         # reveal_all(最速正解でスコア) / first_answer(�
 judge: normalized_match  # 解答の正規化文字列一致
 questions: data/questions.csv
 response_timeout_ms: 30000
+log_dir: logs            # ゲームログ(観戦イベントの JSONL)の保存先。空なら保存しない
 ```
+
+各ゲームは `logs/game_<日時>.jsonl` に保存され、**[viewer](https://github.com/HayabusaContest/hayabusa-quiz-viewer) のアーカイブ再生**で読み込めます。
 
 - **reveal_all** … 最後まで開示し、各エージェントの最速正解位置でスコア(1問1回・誤答ロックアウト)。
 - **first_answer** … 誰かが正解したら終了(誤答はロックアウトして続行)。競技寄り。
