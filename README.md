@@ -47,16 +47,25 @@ log_dir: logs            # ゲームログ(観戦イベントの JSONL)の保存
 - **reveal_all** … 最後まで開示し、各エージェントの最速正解位置でスコア(1問1回・誤答ロックアウト)。
 - **first_answer** … 誰かが正解したら終了(誤答はロックアウトして続行)。競技寄り。
 - **benchmark** … 誤答ロックアウト無し・毎トークン回答可。pass を使わない**常時回答型(hayabusa-chick そのまま)**が乗る。
-- サーバは1ゲーム終了後も**常駐**し、次の接続を待ちます。
+
+## 多重ゲーム(並行実行)
+
+`agent_count` 人そろうごとにゲームを1つ生成し、**複数ゲームを並行実行**します(待機室 → 成立ごとに goroutine 生成)。進行中のゲームは REST で一覧・監視でき、観戦は `?game=<id>` で選びます。各ゲームのログは `game_<日時>_<id>.jsonl` に別々に保存されます。
 
 ## エンドポイント
 
 - `ws /ws` … エージェント(プレイヤー)
-- `ws /viewer` … 観戦ビューア(read-only)
-- `GET /healthz`, `/readyz` … 死活監視(JSON。version・protocol を返す)
+- `ws /viewer?game=<id>` … 観戦ビューア(read-only)。`game` 省略時は最新のゲーム。途中参加でも**履歴をリプレイ**して現在状態に追いつきます。
+- `GET /games` … 進行中ゲームの一覧(id・agents・started_at・finished・scores)
+- `GET /games/{id}` … 1ゲームのスナップショット
+- `GET /healthz`, `/readyz` … 死活監視(JSON。version・protocol・active_games を返す)
 - `GET /` … テキストのヒント
 
 `SIGINT` / `SIGTERM` を受けると新規接続を止め、進行中のゲームを終えてから終了します(graceful shutdown)。
+
+## 認証(任意)
+
+`config.yml` の `auth.player_token`(エージェント)/ `auth.receiver_token`(観戦・REST)を設定すると、その値を要求します。空なら認証なし。ブラウザは `?token=<t>`(WebSocket はヘッダ不可のため)、その他は `Authorization: Bearer <t>` でも可。
 
 ## プロトコルと設計
 

@@ -12,3 +12,13 @@ judge: normalized_match  # 解答の正規化文字列一致
 questions: data/questions.csv
 response_timeout_ms: 30000
 log_dir: logs            # ゲームログ(観戦イベントの JSONL)の保存先。空にすると保存しない
+
+# agent_count 人そろうごとにゲームを1つ生成し、複数ゲームを並行実行する。
+# 進行中のゲームは GET /games で一覧でき、観戦は ws /viewer?game=<id> で選ぶ。
+
+# 任意のアクセストークン(空=認証なし)。設定すると:
+#   agents(/ws)は player_token、観戦(/viewer, /games)は receiver_token を要求。
+#   ブラウザは ?token=<t> で渡す(WebSocket はヘッダを付けられないため)。
+# auth:
+#   player_token: ""
+#   receiver_token: ""
