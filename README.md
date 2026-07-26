@@ -39,7 +39,7 @@ response_timeout_ms: 30000
 log_dir: logs            # ゲームログ(観戦イベントの JSONL)の保存先。空なら保存しない
 ```
 
-各ゲームは `logs/game_<日時>.jsonl` に保存され、**[viewer](https://github.com/HayabusaContest/hayabusa-quiz-viewer) のアーカイブ再生**で読み込めます。
+各ゲームは `logs/game_<日時>.jsonl` に保存されます。**[viewer](https://github.com/HayabusaContest/hayabusa-quiz-viewer) のアーカイブ再生**で観られ、viewer の `logs/` に置いて `tools/build_index.py` を回せば一覧(カタログ)に追加できます。
 
 - **reveal_all** … 最後まで開示し、各エージェントの最速正解位置でスコア(1問1回・誤答ロックアウト)。
 - **first_answer** … 誰かが正解したら終了(誤答はロックアウトして続行)。競技寄り。
