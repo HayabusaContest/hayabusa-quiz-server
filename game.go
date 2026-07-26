@@ -221,6 +221,6 @@ func (g *Game) playQuestion(qid int, q Question) {
 		totals[a.Name] = a.Score
 	}
 	g.broadcast(Packet{Request: ReqResult, QuestionID: qid, Answer: q.Answer, Scores: scores})
-	g.view(ViewEvent{Type: "result", QuestionID: qid, Answer: q.Answer, Scores: scores, Totals: totals})
+	g.view(ViewEvent{Type: "result", QuestionID: qid, Text: q.Text, Answer: q.Answer, Scores: scores, Totals: totals})
 	log.Printf("Q%d done answer=%q scores=%v", qid, q.Answer, scores)
 }
