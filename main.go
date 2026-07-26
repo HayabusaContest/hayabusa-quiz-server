@@ -1,15 +1,22 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// version is the build version, injected via -ldflags "-X main.version=...".
+var version = "dev"
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
@@ -28,7 +35,13 @@ type Server struct {
 
 func main() {
 	cfgPath := flag.String("c", "config/config.yml", "path to server config yml")
+	showVer := flag.Bool("v", false, "print version and exit")
 	flag.Parse()
+
+	if *showVer {
+		fmt.Printf("hayabusa-quiz-server %s (protocol %s)\n", version, ProtocolVersion)
+		return
+	}
 
 	cfg, err := LoadConfig(*cfgPath)
 	if err != nil {
@@ -41,18 +54,38 @@ func main() {
 	if len(qs) == 0 {
 		log.Fatalf("no questions loaded from %s", cfg.Questions)
 	}
+	log.Printf("hayabusa-quiz-server %s | protocol %s", version, ProtocolVersion)
 	log.Printf("loaded %d questions | mode=%s | waiting for %d agents", len(qs), cfg.Mode, cfg.AgentCount)
 
 	s := &Server{cfg: cfg, qs: qs, hub: NewHub()}
-	http.HandleFunc("/ws", s.handleWS)         // agents (players)
-	http.HandleFunc("/viewer", s.handleViewer) // spectators (read-only WS)
-	http.HandleFunc("/", s.handleIndex)        // short hint
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", s.handleWS)          // agents (players)
+	mux.HandleFunc("/viewer", s.handleViewer)  // spectators (read-only WS)
+	mux.HandleFunc("/healthz", s.handleHealth) // liveness
+	mux.HandleFunc("/readyz", s.handleHealth)  // readiness
+	mux.HandleFunc("/", s.handleIndex)         // short hint
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	log.Printf("listening on %s | agents: ws /ws | viewers: ws /viewer", addr)
-	if err := http.ListenAndServe(addr, nil); err != nil {
+	srv := &http.Server{Addr: addr, Handler: mux}
+
+	// graceful shutdown: stop accepting new connections on SIGINT/SIGTERM,
+	// let the in-flight game finish, then exit.
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+		<-sig
+		log.Printf("shutdown signal received; draining...")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	log.Printf("listening on %s | agents: ws /ws | viewers: ws /viewer | health: /healthz", addr)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
+	log.Printf("server stopped")
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +152,12 @@ func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 	// open and receives spectator events via the hub.
 }
 
+// handleHealth is a liveness/readiness probe (always 200 while serving).
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = fmt.Fprintf(w, `{"status":"ok","version":%q,"protocol":%q}`+"\n", version, ProtocolVersion)
+}
+
 // handleIndex returns a short hint (the viewer is a separate static app).
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -126,5 +165,5 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte("arena game server\n  agents : ws /ws\n  viewers: ws /viewer\n観戦は viewer アプリを /viewer に接続してください。\n"))
+	_, _ = w.Write([]byte("hayabusa-quiz-server\n  agents : ws /ws\n  viewers: ws /viewer\n  health : /healthz\n観戦は viewer アプリを /viewer に接続してください。\n"))
 }
