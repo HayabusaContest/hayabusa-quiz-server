@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -45,16 +46,30 @@ func LoadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(b, c); err != nil {
 		return nil, err
 	}
+	applyEnvOverrides(c)
 	if c.Questions == "" {
 		return nil, fmt.Errorf("config: 'questions' path is required")
 	}
 	if c.AgentCount < 1 {
 		return nil, fmt.Errorf("config: agent_count must be >= 1")
 	}
-	if c.Mode != "reveal_all" && c.Mode != "first_answer" && c.Mode != "benchmark" {
-		return nil, fmt.Errorf("config: mode must be 'reveal_all', 'first_answer', or 'benchmark'")
+	if c.Mode != ModeRevealAll && c.Mode != ModeFirstAnswer && c.Mode != ModeBenchmark {
+		return nil, fmt.Errorf("config: mode must be %q, %q, or %q", ModeRevealAll, ModeFirstAnswer, ModeBenchmark)
 	}
 	return c, nil
+}
+
+// applyEnvOverrides lets container/orchestration override host/port without
+// editing config.yml (HOST / PORT env vars).
+func applyEnvOverrides(c *Config) {
+	if v := os.Getenv("HOST"); v != "" {
+		c.Host = v
+	}
+	if v := os.Getenv("PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			c.Port = p
+		}
+	}
 }
 
 func LoadQuestions(path string) ([]Question, error) {

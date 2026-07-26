@@ -1,11 +1,7 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -21,26 +17,12 @@ type Packet struct {
 	Scores     map[string]int `json:"scores,omitempty"`
 }
 
-const (
-	ReqName           = "NAME"
-	ReqQuestionStart  = "QUESTION_START"
-	ReqQuestionUpdate = "QUESTION_UPDATE"
-	ReqResult         = "RESULT"
-	ReqFinish         = "FINISH"
-
-	replyPass = "pass"
-
-	modeFirstAnswer = "first_answer"
-	modeBenchmark   = "benchmark"
-)
-
 type Game struct {
 	cfg    *Config
 	agents []*Agent
 	qs     []Question
 	rt     time.Duration
-	hub    *Hub     // spectator feed (may be nil)
-	logf   *os.File // game log (JSONL of view events); may be nil
+	sink   EventSink // spectator/log fan-out (never nil; may be empty)
 }
 
 func NewGame(cfg *Config, agents []*Agent, qs []Question, hub *Hub) *Game {
@@ -49,7 +31,7 @@ func NewGame(cfg *Config, agents []*Agent, qs []Question, hub *Hub) *Game {
 		agents: agents,
 		qs:     qs,
 		rt:     time.Duration(cfg.ResponseTimeoutMs) * time.Millisecond,
-		hub:    hub,
+		sink:   NewComposite(NewHubSink(hub), NewLogSink(cfg.LogDir)),
 	}
 }
 
@@ -61,52 +43,18 @@ func (g *Game) broadcast(p Packet) {
 	}
 }
 
-func (g *Game) view(e ViewEvent) {
-	if g.hub != nil {
-		g.hub.Broadcast(e)
-	}
-	if g.logf != nil {
-		if b, err := json.Marshal(e); err == nil {
-			_, _ = g.logf.Write(append(b, '\n'))
-		}
-	}
-}
-
-func (g *Game) openLog() {
-	if g.cfg.LogDir == "" {
-		return
-	}
-	if err := os.MkdirAll(g.cfg.LogDir, 0o755); err != nil {
-		log.Printf("log dir error: %v", err)
-		return
-	}
-	path := filepath.Join(g.cfg.LogDir, fmt.Sprintf("game_%s.jsonl", time.Now().Format("20060102-150405")))
-	f, err := os.Create(path)
-	if err != nil {
-		log.Printf("log file error: %v", err)
-		return
-	}
-	g.logf = f
-	log.Printf("logging game to %s", path)
-}
-
-func (g *Game) closeLog() {
-	if g.logf != nil {
-		_ = g.logf.Close()
-		g.logf = nil
-	}
-}
+// view emits a spectator event to every attached sink (viewer hub, JSONL log, ...).
+func (g *Game) view(e ViewEvent) { g.sink.Emit(e) }
 
 // Run plays every question, then broadcasts the final scores.
 func (g *Game) Run() {
-	g.openLog()
-	defer g.closeLog()
+	defer g.sink.Close()
 
 	names := make([]string, len(g.agents))
 	for i, a := range g.agents {
 		names[i] = a.Name
 	}
-	g.view(ViewEvent{Type: "game_start", Agents: names})
+	g.view(ViewEvent{Type: ViewGameStart, Agents: names})
 
 	for i, q := range g.qs {
 		g.playQuestion(i+1, q)
@@ -117,7 +65,7 @@ func (g *Game) Run() {
 		final[a.Name] = a.Score
 	}
 	g.broadcast(Packet{Request: ReqFinish, Scores: final})
-	g.view(ViewEvent{Type: "finish", Scores: final})
+	g.view(ViewEvent{Type: ViewFinish, Scores: final})
 	log.Printf("=== GAME FINISHED === %v", final)
 }
 
@@ -127,6 +75,7 @@ func (g *Game) Run() {
 //   - reveal_all:   reveal to the end; each agent scored by its earliest correct.
 //   - first_answer: a correct answer ends the question (wrong answers lock out
 //                   that agent and revealing continues for the rest).
+//   - benchmark:    wrong answers neither commit nor lock out (always-answer agents).
 func (g *Game) playQuestion(qid int, q Question) {
 	for _, a := range g.agents {
 		a.Committed = false
@@ -138,10 +87,10 @@ func (g *Game) playQuestion(qid int, q Question) {
 	total := len(runes)
 
 	g.broadcast(Packet{Request: ReqQuestionStart, QuestionID: qid})
-	g.view(ViewEvent{Type: "question_start", QuestionID: qid, Total: total})
+	g.view(ViewEvent{Type: ViewQuestionStart, QuestionID: qid, Total: total})
 
-	firstAnswer := g.cfg.Mode == modeFirstAnswer
-	benchmark := g.cfg.Mode == modeBenchmark
+	firstAnswer := g.cfg.Mode == ModeFirstAnswer
+	benchmark := g.cfg.Mode == ModeBenchmark
 
 	for i := 1; i <= total; i++ {
 		var active []*Agent
@@ -155,7 +104,7 @@ func (g *Game) playQuestion(qid int, q Question) {
 		}
 
 		prefix := string(runes[:i])
-		g.view(ViewEvent{Type: "reveal", QuestionID: qid, Cursor: i, Text: prefix})
+		g.view(ViewEvent{Type: ViewReveal, QuestionID: qid, Cursor: i, Text: prefix})
 
 		upd := Packet{Request: ReqQuestionUpdate, QuestionID: qid, Cursor: i, Text: prefix}
 
@@ -183,7 +132,7 @@ func (g *Game) playQuestion(qid int, q Question) {
 		correctNow := false
 		for idx, a := range active {
 			reply := strings.TrimSpace(replies[idx])
-			if reply == "" || strings.EqualFold(reply, replyPass) {
+			if reply == "" || strings.EqualFold(reply, ReplyPass) {
 				continue // still watching
 			}
 			ok := judge(reply, q.Answer)
@@ -201,7 +150,7 @@ func (g *Game) playQuestion(qid int, q Question) {
 				a.LockedOut = true
 				log.Printf("Q%d [%s] WRONG at %d/%d: %q (locked out)", qid, a.Name, i, total, reply)
 			}
-			g.view(ViewEvent{Type: "answer", QuestionID: qid, Cursor: i, Agent: a.Name, Reply: reply, Correct: ok})
+			g.view(ViewEvent{Type: ViewAnswer, QuestionID: qid, Cursor: i, Agent: a.Name, Reply: reply, Correct: ok})
 		}
 
 		if firstAnswer && correctNow {
@@ -221,6 +170,6 @@ func (g *Game) playQuestion(qid int, q Question) {
 		totals[a.Name] = a.Score
 	}
 	g.broadcast(Packet{Request: ReqResult, QuestionID: qid, Answer: q.Answer, Scores: scores})
-	g.view(ViewEvent{Type: "result", QuestionID: qid, Text: q.Text, Answer: q.Answer, Scores: scores, Totals: totals})
+	g.view(ViewEvent{Type: ViewResult, QuestionID: qid, Text: q.Text, Answer: q.Answer, Scores: scores, Totals: totals})
 	log.Printf("Q%d done answer=%q scores=%v", qid, q.Answer, scores)
 }
