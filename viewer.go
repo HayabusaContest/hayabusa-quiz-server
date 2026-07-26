@@ -24,11 +24,14 @@ type ViewEvent struct {
 	Agents     []string       `json:"agents,omitempty"`
 }
 
-// Hub fans out spectator events to all connected viewers. Viewers are
-// write-only (they never affect the game) and never block it.
+// Hub fans out one game's spectator events to its viewers. Viewers are
+// write-only (they never affect the game) and never block it. The hub keeps
+// the event history so a viewer that connects mid-game is replayed the events
+// so far and immediately sees the current state.
 type Hub struct {
 	mu      sync.Mutex
 	viewers map[*websocket.Conn]struct{}
+	history []ViewEvent
 }
 
 func NewHub() *Hub {
@@ -37,10 +40,20 @@ func NewHub() *Hub {
 
 func (h *Hub) Add(conn *websocket.Conn) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	// replay events so far so a late viewer catches up to the current state.
+	for _, e := range h.history {
+		b, err := json.Marshal(e)
+		if err != nil {
+			continue
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
+			conn.Close()
+			return
+		}
+	}
 	h.viewers[conn] = struct{}{}
-	n := len(h.viewers)
-	h.mu.Unlock()
-	log.Printf("viewer connected (%d watching)", n)
+	log.Printf("viewer connected (%d watching)", len(h.viewers))
 }
 
 func (h *Hub) Broadcast(e ViewEvent) {
@@ -50,6 +63,7 @@ func (h *Hub) Broadcast(e ViewEvent) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.history = append(h.history, e)
 	for c := range h.viewers {
 		if err := c.WriteMessage(websocket.TextMessage, b); err != nil {
 			delete(h.viewers, c)

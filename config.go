@@ -12,14 +12,22 @@ import (
 
 // Config is the server configuration (config.yml).
 type Config struct {
-	Host              string `yaml:"host"`
-	Port              int    `yaml:"port"`
-	AgentCount        int    `yaml:"agent_count"`
-	Mode              string `yaml:"mode"`  // reveal_all | first_answer | benchmark
-	Judge             string `yaml:"judge"` // normalized_match
-	Questions         string `yaml:"questions"`
-	ResponseTimeoutMs int    `yaml:"response_timeout_ms"`
-	LogDir            string `yaml:"log_dir"` // ゲームログ(JSONL)の保存先。空なら保存しない
+	Host              string     `yaml:"host"`
+	Port              int        `yaml:"port"`
+	AgentCount        int        `yaml:"agent_count"`
+	Mode              string     `yaml:"mode"`  // reveal_all | first_answer | benchmark
+	Judge             string     `yaml:"judge"` // normalized_match
+	Questions         string     `yaml:"questions"`
+	ResponseTimeoutMs int        `yaml:"response_timeout_ms"`
+	LogDir            string     `yaml:"log_dir"` // ゲームログ(JSONL)の保存先。空なら保存しない
+	Auth              AuthConfig `yaml:"auth"`
+}
+
+// AuthConfig holds optional access tokens. Empty tokens mean no auth.
+// player_token gates agents (/ws); receiver_token gates spectators (/viewer, /games).
+type AuthConfig struct {
+	PlayerToken   string `yaml:"player_token"`
+	ReceiverToken string `yaml:"receiver_token"`
 }
 
 // Question is one quiz row (No, 問題文, 解答).

@@ -61,7 +61,8 @@ func (h *HubSink) Close()           {}
 type LogSink struct{ f *os.File }
 
 // NewLogSink は dir が空、または作成失敗時に interface-nil を返す(保存しない)。
-func NewLogSink(dir string) EventSink {
+// id をファイル名に含めるので、同一秒に始まる並行ゲームでも衝突しない。
+func NewLogSink(dir, id string) EventSink {
 	if dir == "" {
 		return nil
 	}
@@ -69,7 +70,7 @@ func NewLogSink(dir string) EventSink {
 		log.Printf("log dir error: %v", err)
 		return nil
 	}
-	path := filepath.Join(dir, fmt.Sprintf("game_%s.jsonl", time.Now().Format("20060102-150405")))
+	path := filepath.Join(dir, fmt.Sprintf("game_%s_%s.jsonl", time.Now().Format("20060102-150405"), id))
 	f, err := os.Create(path)
 	if err != nil {
 		log.Printf("log file error: %v", err)

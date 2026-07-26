@@ -17,28 +17,81 @@ type Packet struct {
 	Scores     map[string]int `json:"scores,omitempty"`
 }
 
-type Game struct {
-	cfg    *Config
-	agents []*Agent
-	qs     []Question
-	rt     time.Duration
-	sink   EventSink // spectator/log fan-out (never nil; may be empty)
+// GameSnapshot is a read-only summary of a game for the REST API.
+type GameSnapshot struct {
+	ID        string         `json:"id"`
+	Agents    []string       `json:"agents"`
+	StartedAt string         `json:"started_at"`
+	Finished  bool           `json:"finished"`
+	Scores    map[string]int `json:"scores"`
+	Questions int            `json:"questions"`
 }
 
-func NewGame(cfg *Config, agents []*Agent, qs []Question, hub *Hub) *Game {
+type Game struct {
+	ID        string
+	cfg       *Config
+	agents    []*Agent
+	qs        []Question
+	rt        time.Duration
+	hub       *Hub
+	sink      EventSink
+	startedAt time.Time
+
+	mu       sync.RWMutex // guards finished/scores (read by REST goroutine)
+	finished bool
+	scores   map[string]int
+}
+
+func NewGame(cfg *Config, agents []*Agent, qs []Question, id string) *Game {
+	hub := NewHub()
 	return &Game{
-		cfg:    cfg,
-		agents: agents,
-		qs:     qs,
-		rt:     time.Duration(cfg.ResponseTimeoutMs) * time.Millisecond,
-		sink:   NewComposite(NewHubSink(hub), NewLogSink(cfg.LogDir)),
+		ID:        id,
+		cfg:       cfg,
+		agents:    agents,
+		qs:        qs,
+		rt:        time.Duration(cfg.ResponseTimeoutMs) * time.Millisecond,
+		hub:       hub,
+		sink:      NewComposite(NewHubSink(hub), NewLogSink(cfg.LogDir, id)),
+		startedAt: time.Now(),
+		scores:    map[string]int{},
 	}
+}
+
+// Hub returns this game's spectator hub (viewers attach here).
+func (g *Game) Hub() *Hub { return g.hub }
+
+// Snapshot returns a read-only summary (safe to call from other goroutines).
+func (g *Game) Snapshot() GameSnapshot {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	names := make([]string, len(g.agents))
+	for i, a := range g.agents {
+		names[i] = a.Name
+	}
+	sc := make(map[string]int, len(g.scores))
+	for k, v := range g.scores {
+		sc[k] = v
+	}
+	return GameSnapshot{
+		ID: g.ID, Agents: names, StartedAt: g.startedAt.Format(time.RFC3339),
+		Finished: g.finished, Scores: sc, Questions: len(g.qs),
+	}
+}
+
+func (g *Game) setScores(s map[string]int) {
+	cp := make(map[string]int, len(s))
+	for k, v := range s {
+		cp[k] = v
+	}
+	g.mu.Lock()
+	g.scores = cp
+	g.mu.Unlock()
 }
 
 func (g *Game) broadcast(p Packet) {
 	for _, a := range g.agents {
 		if err := a.SendJSON(p); err != nil {
-			log.Printf("broadcast to %s failed: %v", a.Name, err)
+			log.Printf("[%s] broadcast to %s failed: %v", g.ID, a.Name, err)
 		}
 	}
 }
@@ -64,9 +117,13 @@ func (g *Game) Run() {
 	for _, a := range g.agents {
 		final[a.Name] = a.Score
 	}
+	g.setScores(final)
+	g.mu.Lock()
+	g.finished = true
+	g.mu.Unlock()
 	g.broadcast(Packet{Request: ReqFinish, Scores: final})
 	g.view(ViewEvent{Type: ViewFinish, Scores: final})
-	log.Printf("=== GAME FINISHED === %v", final)
+	log.Printf("[%s] === GAME FINISHED === %v", g.ID, final)
 }
 
 // playQuestion reveals the question one rune at a time in lockstep.
@@ -74,7 +131,7 @@ func (g *Game) Run() {
 // the first non-pass answer commits an agent for the whole question.
 //   - reveal_all:   reveal to the end; each agent scored by its earliest correct.
 //   - first_answer: a correct answer ends the question (wrong answers lock out
-//                   that agent and revealing continues for the rest).
+//     that agent and revealing continues for the rest).
 //   - benchmark:    wrong answers neither commit nor lock out (always-answer agents).
 func (g *Game) playQuestion(qid int, q Question) {
 	for _, a := range g.agents {
@@ -116,12 +173,12 @@ func (g *Game) playQuestion(qid int, q Question) {
 			go func(idx int, a *Agent) {
 				defer wg.Done()
 				if err := a.SendJSON(upd); err != nil {
-					log.Printf("send to %s failed: %v", a.Name, err)
+					log.Printf("[%s] send to %s failed: %v", g.ID, a.Name, err)
 					return
 				}
 				r, err := a.Recv(g.rt)
 				if err != nil {
-					log.Printf("recv from %s failed: %v (treated as pass)", a.Name, err)
+					log.Printf("[%s] recv from %s failed: %v (treated as pass)", g.ID, a.Name, err)
 					return
 				}
 				replies[idx] = r
@@ -140,15 +197,14 @@ func (g *Game) playQuestion(qid int, q Question) {
 				a.Committed = true // 正解で確定(以後この問題は抜ける)
 				a.CorrectAt = i
 				correctNow = true
-				log.Printf("Q%d [%s] CORRECT at %d/%d: %q", qid, a.Name, i, total, reply)
+				log.Printf("[%s] Q%d [%s] CORRECT at %d/%d: %q", g.ID, qid, a.Name, i, total, reply)
 			} else if benchmark {
 				// benchmark: 誤答はロックアウトも確定もせず、次の文字でまた回答できる
-				// (毎トークン回答する常時回答型エージェントがそのまま乗る)
-				log.Printf("Q%d [%s] wrong at %d/%d: %q (benchmark: 続行)", qid, a.Name, i, total, reply)
+				log.Printf("[%s] Q%d [%s] wrong at %d/%d: %q (benchmark: 続行)", g.ID, qid, a.Name, i, total, reply)
 			} else {
 				a.Committed = true // 1問1回:誤答でロックアウト
 				a.LockedOut = true
-				log.Printf("Q%d [%s] WRONG at %d/%d: %q (locked out)", qid, a.Name, i, total, reply)
+				log.Printf("[%s] Q%d [%s] WRONG at %d/%d: %q (locked out)", g.ID, qid, a.Name, i, total, reply)
 			}
 			g.view(ViewEvent{Type: ViewAnswer, QuestionID: qid, Cursor: i, Agent: a.Name, Reply: reply, Correct: ok})
 		}
@@ -169,7 +225,8 @@ func (g *Game) playQuestion(qid int, q Question) {
 		scores[a.Name] = pts
 		totals[a.Name] = a.Score
 	}
+	g.setScores(totals)
 	g.broadcast(Packet{Request: ReqResult, QuestionID: qid, Answer: q.Answer, Scores: scores})
 	g.view(ViewEvent{Type: ViewResult, QuestionID: qid, Text: q.Text, Answer: q.Answer, Scores: scores, Totals: totals})
-	log.Printf("Q%d done answer=%q scores=%v", qid, q.Answer, scores)
+	log.Printf("[%s] Q%d done answer=%q scores=%v", g.ID, qid, q.Answer, scores)
 }
