@@ -1,4 +1,4 @@
-module arena-server
+module hayabusa-quiz-server
 
 go 1.22
 
